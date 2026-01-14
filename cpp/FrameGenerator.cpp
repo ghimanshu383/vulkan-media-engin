@@ -12,7 +12,7 @@ extern "C" {
 
 
 namespace fd {
-    int FrameGenerator::load_video_stream(const char *videoPath) {
+    AvIndex FrameGenerator::load_av_stream(const char *videoPath) {
         if (avformat_open_input(&m_avContext, videoPath, nullptr, nullptr) < 0) {
             std::cout << "failed to load the video from the context" << std::endl;
             std::exit(EXIT_FAILURE);
@@ -22,21 +22,27 @@ namespace fd {
             std::exit(EXIT_FAILURE);
         }
         int videoStream = -1;
+        int audioStream = -1;
         for (int i = 0; i < m_avContext->nb_streams; i++) {
             if (m_avContext->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
                 videoStream = i;
-                break;
+            } else if (m_avContext->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+                audioStream = i;
             }
         }
         if (videoStream == -1) {
             std::cout << "No Video Stream found in this file" << std::endl;
-            std::exit(EXIT_FAILURE);
         }
-
-        return videoStream;
+        if (audioStream == -1) {
+            std::cout << "No Audio Stream found in this file";
+        }
+        return {audioStream, videoStream};
     }
 
-    void FrameGenerator::decode_and_process_frames(int vidIndex) {
+    void FrameGenerator::decode_and_process_vid_frames(int vidIndex) {
+        AVRational rationalTimeBase = m_avContext->streams[vidIndex]->time_base;
+        double timeBase = av_q2d(rationalTimeBase);
+
         AVCodecParameters *codecPars = m_avContext->streams[vidIndex]->codecpar;
         const AVCodec *decoder = avcodec_find_decoder(codecPars->codec_id);
         if (!decoder) {
@@ -58,7 +64,10 @@ namespace fd {
             if (packet->stream_index == vidIndex) {
                 if (avcodec_send_packet(codecContext, packet) == 0) {
                     while (avcodec_receive_frame(codecContext, frame) == 0) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+                        double pts = 0.0;
+                        if (frame->pts != AV_NOPTS_VALUE) {
+                            pts = (double) frame->pts * timeBase;
+                        }
 
                         int w = frame->width;
                         int h = frame->height;
@@ -70,13 +79,8 @@ namespace fd {
                         int uStride = frame->linesize[1];
                         int vStride = frame->linesize[2];
 
-                        LOG_INFO("uStride {} vStride {} width {}", uStride, vStride, yStride);
-                        AVPixelFormat format = static_cast<AVPixelFormat>(frame->format);
-                        const char *fmtName = av_get_pix_fmt_name(format);
-                        std::cout << "Decoded frame format: "
-                                  << (fmtName ? fmtName : "unknown")
-                                  << std::endl;
-
+//                        AVPixelFormat format = static_cast<AVPixelFormat>(frame->format);
+//                        const char *fmtName = av_get_pix_fmt_name(format);
                         // the plane is deleted at the consumer side;
                         int chromaH = h >> 1;
                         int chromaW = w >> 1;
@@ -94,12 +98,16 @@ namespace fd {
                         }
                         {
                             std::lock_guard<std::mutex> lock{_mutex};
-                            m_frame_queue.push(std::move(plane));
-                            m_frame_queue_u.push(std::move(uPlanePtr));
-                            m_frame_queue_v.push(std::move(vPlanePtr));
+                            VideoFrame videoFrame{std::move(plane), std::move(uPlanePtr), std::move(vPlanePtr), pts};
+
+                            m_frame_queue.push(std::move(videoFrame));
                             isGeneratorReady = true;
                             m_height = h;
                             m_yStride = w;
+                            if (!isClockStarted) {
+                                frame_start = std::chrono::steady_clock::now();
+                                isClockStarted = true;
+                            }
                             m_cv.notify_all();
                         }
 
@@ -119,11 +127,22 @@ namespace fd {
         }
     }
 
+    void FrameGenerator::decode_and_process_audio_frames(int audioIndex) {
+
+    }
+
     void FrameGenerator::process(const char *vidPath) {
         std::thread threadOne{[this, vidPath]() -> void {
-            int index = load_video_stream(vidPath);
-            decode_and_process_frames(index);
+            AvIndex avIndex = load_av_stream(vidPath);
+            decode_and_process_vid_frames(avIndex.videoIndex);
         }};
         threadOne.detach();
+//        if (avIndex.audioIndex != -1) {
+//            std::thread threadAudio{[this, &avIndex]() -> void {
+//                decode_and_process_audio_frames(avIndex.audioIndex);
+//            }};
+//            threadAudio.detach();
+//        }
     }
+
 }

@@ -133,7 +133,8 @@ namespace fd {
                                 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT,
                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
-        if (isFirstRender) { isFirstRender = false; }
+        if (isFirstRender) {
+            isFirstRender = false; }
     }
 
     void FrameHandler::cleanup() {

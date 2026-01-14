@@ -39,6 +39,23 @@ struct Vertex {
     glm::vec2 uv;
 };
 
+struct VideoFrame {
+    std::unique_ptr<uint8_t[]> yPlane;
+    std::unique_ptr<uint8_t[]> uPlane;
+    std::unique_ptr<uint8_t[]> vPlane;
+    double pts_seconds;
+};
+
+struct AudioPCM {
+    std::unique_ptr<int16_t[]> samples;
+    int channel;
+    int sampleRate;
+    int interleaved;
+};
+struct AvIndex {
+    int audioIndex;
+    int videoIndex;
+};
 
 inline void clamp(int &val) {
     if (val < 0) {
@@ -49,6 +66,15 @@ inline void clamp(int &val) {
         val = 255;
         return;
     }
+}
+
+inline float clamp_float_audio(float val) {
+    if (val < -1.0f) {
+        val = -1.0f;
+    } else if (val > 1.0f) {
+        val = 1.0f;
+    }
+    return val;
 }
 
 inline uint32_t

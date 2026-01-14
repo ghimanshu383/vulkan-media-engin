@@ -9,17 +9,17 @@
 #include <iostream>
 #include "VulkanGraphics.h"
 #include "Util.h"
+#include "FrameGeneratorTwo.h"
 
 namespace fd {
     VulkanGraphics::VulkanGraphics(GLFWwindow *window) : m_window{window} {
         init();
-
     }
 
     VulkanGraphics::~VulkanGraphics() {
         vkDeviceWaitIdle(m_device.logicalDevice);
         FrameHandler::get_instance(m_ctx, 0, 0)->cleanup();
-        delete fmGenerator;
+        delete m_fmGenerator;
         delete m_ctx;
         vkDestroyBuffer(m_device.logicalDevice, quadVertBuffer, nullptr);
         vkFreeMemory(m_device.logicalDevice, vertBufferMemory, nullptr);
@@ -59,12 +59,13 @@ namespace fd {
         m_ctx->commandPool = m_command_pool;
         m_ctx->graphicsQueue = m_graphics_queue;
         prepare_quad_display();
-        fmGenerator = new FrameGenerator();
-        fmGenerator->process("D:\\vid2.mp4");
+        m_fmGenerator = new FrameGeneratorTwo();
+        m_fmGenerator->process("D:\\vid.mp4");
         {
-            std::unique_lock<std::mutex> lock{fmGenerator->_mutex};
-            fmGenerator->m_cv.wait(lock, [this]() -> bool { return fmGenerator->isGeneratorReady; });
-            FrameHandler::get_instance(m_ctx, fmGenerator->m_yStride, fmGenerator->m_height);
+            std::unique_lock<std::mutex> lock{m_fmGenerator->get_vid_mutex()};
+            m_fmGenerator->get_vid_cv().wait(lock, [this]() -> bool { return m_fmGenerator->is_generator_ready(); });
+            FrameHandler::get_instance(m_ctx, m_fmGenerator->get_vid_frame_width(),
+                                       m_fmGenerator->get_vid_frame_height());
         }
 
         create_pipeline();
@@ -570,17 +571,29 @@ namespace fd {
                                 nullptr);
 
         {
-            fmGenerator->_mutex.lock();
-            std::unique_ptr yPlane = std::move(fmGenerator->m_frame_queue.front());
-            std::unique_ptr uPlane = std::move(fmGenerator->m_frame_queue_u.front());
-            std::unique_ptr vPlane = std::move(fmGenerator->m_frame_queue_v.front());
+            m_fmGenerator->get_vid_mutex().lock();
+            VideoFrame videoFrame = std::move(m_fmGenerator->get_vide_frame_queue().front());
+            m_fmGenerator->notify_video_frame_processed();
+            m_fmGenerator->get_vid_mutex().unlock();
+            std::unique_ptr<uint8_t[]> yPlane = std::move(videoFrame.yPlane);
+            std::unique_ptr<uint8_t[]> vPlane = std::move(videoFrame.vPlane);
+            std::unique_ptr<uint8_t[]> uPlane = std::move(videoFrame.uPlane);
             //Scalar RGBA conversion.
-            uint32_t *rgba = new uint32_t[fmGenerator->m_yStride * fmGenerator->m_height];
-            yuv_to_rgba(fmGenerator->m_yStride, fmGenerator->m_height, yPlane.get(), vPlane.get(), uPlane.get(), rgba);
+            uint32_t *rgba = new uint32_t[m_fmGenerator->get_vid_frame_width() * m_fmGenerator->get_vid_frame_height()];
+            yuv_to_rgba(m_fmGenerator->get_vid_frame_width(), m_fmGenerator->get_vid_frame_height(), yPlane.get(),
+                        vPlane.get(), uPlane.get(), rgba);
             FrameHandler::get_instance(m_ctx, 0, 0)->render(rgba);
-            fmGenerator->notify_frame_processed();
+            double pts = videoFrame.pts_seconds;
+            double timePassed = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - m_fmGenerator->frame_start).count();
+
+            if (timePassed < pts) {
+                std::this_thread::sleep_for(std::chrono::duration<double>(pts - timePassed));
+            } else if (pts < timePassed) {
+                LOG_INFO("Bad Frame");
+            }
             delete[] rgba;
-            fmGenerator->_mutex.unlock();
+
         }
 
         vkCmdDrawIndexed(m_command_buffer, 6, 1, 0, 0, 0);
@@ -601,7 +614,6 @@ namespace fd {
         submitInfo.pSignalSemaphores = &m_render_image_semaphore;
         vkResetFences(m_device.logicalDevice, 1, &m_render_fence);
         vkQueueSubmit(m_graphics_queue, 1, &submitInfo, m_render_fence);
-
 
         VkPresentInfoKHR presentInfo{};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -661,13 +673,13 @@ namespace fd {
 
     void VulkanGraphics::render() {
         {
-            std::unique_lock<std::mutex> lock{fmGenerator->_mutex};
-            fmGenerator->m_cv.wait(lock, [this]() -> bool { return !fmGenerator->m_frame_queue.empty(); });
+            std::unique_lock<std::mutex> lock{m_fmGenerator->get_vid_mutex()};
+            m_fmGenerator->get_vid_cv().wait(lock,
+                                             [this]() -> bool { return !m_fmGenerator->get_vide_frame_queue().empty(); });
         }
         begin_frame();
         draw();
         end_frame();
-        vkWaitForFences(m_device.logicalDevice, 1, &m_render_fence, VK_TRUE, UINT32_MAX);
     }
 
     void VulkanGraphics::yuv_to_rgba(uint32_t width, uint32_t height, const uint8_t *yPlane, const uint8_t *vPlane,

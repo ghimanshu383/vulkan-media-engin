@@ -12,15 +12,17 @@ extern "C" {
 #include <condition_variable>
 #include <queue>
 #include <memory>
+#include <chrono>
 
 namespace fd {
     class FrameGenerator {
     private:
         AVFormatContext *m_avContext = nullptr;
 
-        int load_video_stream(const char *videoPath);
+        AvIndex load_av_stream(const char *videoPath);
 
-        void decode_and_process_frames(int vidIndex);
+        void decode_and_process_vid_frames(int vidIndex);
+        void decode_and_process_audio_frames(int audioIndex);
 
     public:
         bool isGeneratorReady = false;
@@ -32,20 +34,18 @@ namespace fd {
         std::condition_variable m_cv;
         std::condition_variable m_cv_render;
         std::mutex _mutex;
-        std::queue<std::unique_ptr<uint8_t[]>> m_frame_queue;
-        std::queue<std::unique_ptr<uint8_t[]>> m_frame_queue_u;
-        std::queue<std::unique_ptr<uint8_t []>> m_frame_queue_v;
+        std::queue<VideoFrame> m_frame_queue;
+        std::chrono::time_point<std::chrono::steady_clock> frame_start;
+        bool isClockStarted = false;
+
 
         void process(const char *vidPath);
 
         void notify_frame_processed() {
-            {
-                isFrameProcessed = true;
-                m_frame_queue.pop();
-                m_frame_queue_v.pop();
-                m_frame_queue_u.pop();
-                m_cv_render.notify_one();
-            }
+
+            isFrameProcessed = true;
+            m_frame_queue.pop();
+            m_cv_render.notify_one();
         }
     };
 }

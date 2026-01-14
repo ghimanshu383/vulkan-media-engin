@@ -30,6 +30,8 @@ add_executable(realTimeFrameDisplay main.cpp
         cpp/RenderWindow.cpp
         cpp/FrameHandler.cpp
         include/FrameHandler.h
+        cpp/FrameGeneratorTwo.cpp
+        include/FrameGeneratorTwo.h
 
 )
 
@@ -47,4 +49,6 @@ target_link_libraries(realTimeFrameDisplay PUBLIC
         spdlog::spdlog
         glfw
         D:\\VulkanSDK\\1.3.283.0\\Lib\\vulkan-1.lib
+        ole32
+        uuid
 )

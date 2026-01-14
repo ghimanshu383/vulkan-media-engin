@@ -10,19 +10,18 @@
 #include <condition_variable>
 #include <optional>
 #include "FrameHandler.h"
-#include "FrameGenerator.h"
+#include "FrameGeneratorTwo.h"
 
 namespace fd {
     class VulkanGraphics {
     private:
         GLFWwindow *m_window = nullptr;
         struct RenderContext *m_ctx;
-        FrameGenerator *fmGenerator = nullptr;
 
         RenderContext *get_context() { return m_ctx; }
 
         void init();
-
+        FrameGeneratorTwo* m_fmGenerator = nullptr;
         std::condition_variable m_cv_graphics;
         std::mutex _mutex;
 
