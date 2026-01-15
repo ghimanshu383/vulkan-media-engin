@@ -28,6 +28,9 @@ namespace fd {
         VkPhysicalDevice physicalDevice;
         VkDevice logicalDevice;
         VkQueue graphicsQueue;
+        uint32_t graphicsQueueIndex;
+        VkQueue computeQueue;
+        uint32_t computeQueueIndex;
         VkCommandPool commandPool;
         uint32_t imageCount;
         VkDescriptorSetLayout desLayoutFrame;
@@ -160,13 +163,19 @@ inline VkFence get_fence(fd::RenderContext *ctx) {
     return fence;
 }
 
-inline void submit_queue(fd::RenderContext *ctx, VkCommandBuffer commandBuffer) {
+inline void
+submit_queue(fd::RenderContext *ctx, VkCommandBuffer commandBuffer, VkSemaphore waitSemaphore = VK_NULL_HANDLE) {
     vkEndCommandBuffer(commandBuffer);
     VkFence fence = get_fence(ctx);
     VkSubmitInfo submitInfo{};
+    std::vector<VkPipelineStageFlags> waitFlags{VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT};
+
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
+    submitInfo.waitSemaphoreCount = waitSemaphore == VK_NULL_HANDLE ? 0 : 1;
+    submitInfo.pWaitSemaphores = &waitSemaphore;
+    submitInfo.pWaitDstStageMask = waitSemaphore == VK_NULL_HANDLE ? nullptr : waitFlags.data();
 
     vkResetFences(ctx->logicalDevice, 1, &fence);
     vkQueueSubmit(ctx->graphicsQueue, 1, &submitInfo, fence);
@@ -270,7 +279,9 @@ inline void
 transition_image_layout(fd::RenderContext *ctx, VkCommandBuffer commandBuffer, VkImage image,
                         VkImageAspectFlags aspectFlags, VkImageLayout oldLayout,
                         VkImageLayout newLayout, VkAccessFlags srcAccess, VkPipelineStageFlags srcStage,
-                        VkAccessFlags dstAccess, VkPipelineStageFlags dstStage) {
+                        VkAccessFlags dstAccess, VkPipelineStageFlags dstStage,
+                        uint32_t srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        uint32_t dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED) {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.image = image;
@@ -279,8 +290,8 @@ transition_image_layout(fd::RenderContext *ctx, VkCommandBuffer commandBuffer, V
     barrier.subresourceRange.levelCount = 1;
     barrier.subresourceRange.baseMipLevel = 0;
     barrier.subresourceRange.aspectMask = aspectFlags;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.srcQueueFamilyIndex = srcQueueFamilyIndex;
+    barrier.dstQueueFamilyIndex = dstQueueFamilyIndex;
     barrier.oldLayout = oldLayout;
     barrier.newLayout = newLayout;
     barrier.srcAccessMask = srcAccess;
@@ -297,6 +308,48 @@ transition_image_layout(fd::RenderContext *ctx, VkCommandBuffer commandBuffer, V
                          1, &barrier);
     submit_queue(ctx, commandBuffer);
 
+}
+
+inline void
+image_to_image(fd::RenderContext *ctx, VkCommandBuffer commandBuffer, VkImage &srcImage, VkImage &dstImage,
+               uint32_t width,
+               uint32_t height, VkSemaphore& waitSemaphore) {
+    VkImageCopy region{};
+    region.srcOffset = {0, 0};
+    region.dstOffset = {0, 0};
+    region.extent = {width, height, 1};
+    region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.srcSubresource.layerCount = 1;
+    region.srcSubresource.baseArrayLayer = 0;
+    region.srcSubresource.mipLevel = 0;
+    region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.dstSubresource.layerCount = 1;
+    region.dstSubresource.baseArrayLayer = 0;
+    region.dstSubresource.mipLevel = 0;
+
+    vkResetCommandBuffer(commandBuffer, 0);
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    VK_CHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo), "Failed to begin the command buffer");
+    vkCmdCopyImage(commandBuffer, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstImage,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    submit_queue(ctx, commandBuffer, waitSemaphore);
+
+}
+
+inline void create_sampler(VkDevice logicalDevice, VkSampler &sampler) {
+    VkSamplerCreateInfo samplerCreateInfo{};
+    samplerCreateInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerCreateInfo.magFilter = VK_FILTER_LINEAR;
+    samplerCreateInfo.minFilter = VK_FILTER_LINEAR;
+    samplerCreateInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerCreateInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerCreateInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerCreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+    samplerCreateInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+
+    VK_CHECK(vkCreateSampler(logicalDevice, &samplerCreateInfo, nullptr, &sampler),
+             "failed to create the sampler");
 }
 
 #endif //REALTIMEFRAMEDISPLAY_UTIL_H

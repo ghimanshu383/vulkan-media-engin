@@ -41,7 +41,9 @@ namespace fd {
 
     public:
 
-        void render(uint32_t* rgba);
+        void render(uint32_t *rgba);
+
+        void render_with_compute_image(VkImage &rgbaImage, VkSemaphore& computeSemaphore);
 
         VkDescriptorSetLayout &get_des_layout() { return m_des_layout; }
 

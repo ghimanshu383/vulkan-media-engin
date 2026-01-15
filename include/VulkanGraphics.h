@@ -11,7 +11,7 @@
 #include <optional>
 #include "FrameHandler.h"
 #include "FrameGeneratorTwo.h"
-
+#include "VulkanYuvToRgba.h"
 namespace fd {
     class VulkanGraphics {
     private:
@@ -24,6 +24,7 @@ namespace fd {
         FrameGeneratorTwo* m_fmGenerator = nullptr;
         std::condition_variable m_cv_graphics;
         std::mutex _mutex;
+        ComputeYuvRgba* m_computeYuvRgba = nullptr;
 
 #pragma region INSTANCE_AND_VALIDATION
         VkInstance m_instance{};
@@ -44,6 +45,7 @@ namespace fd {
         struct QueueFamilyIndex {
             std::optional<uint32_t> graphicsIndex{};
             std::optional<uint32_t> presentationIndex{};
+            std::optional<uint32_t> computeIndex {};
 
             bool is_valid() {
                 return (graphicsIndex.has_value() && presentationIndex.has_value());
@@ -53,6 +55,7 @@ namespace fd {
         VkSurfaceKHR m_surface{};
         VkQueue m_graphics_queue{};
         VkQueue m_presentation_queue{};
+        VkQueue m_compute_queue{};
 
         void get_physical_device_and_create_logical_device();
 

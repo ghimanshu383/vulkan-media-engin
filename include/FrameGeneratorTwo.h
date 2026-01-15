@@ -37,7 +37,7 @@ namespace fd {
         IAudioClient* m_audioClient = nullptr;
         IAudioRenderClient* m_audio_render_client = nullptr;
         UINT32 bufferFrameCount = 0;
-
+        double m_audio_clock = 0.0;
         void start_demuxer_thread(const char *videoPath);
 
         void start_video_decoder_thread();
@@ -46,7 +46,7 @@ namespace fd {
 
     public:
         ~FrameGeneratorTwo();
-
+        double get_audio_clock() {return m_audio_clock;}
         std::chrono::time_point<std::chrono::steady_clock> frame_start;
 
         void process(const char *videoPath);

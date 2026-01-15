@@ -58,6 +58,9 @@ namespace fd {
         m_ctx->imageCount = m_image_count;
         m_ctx->commandPool = m_command_pool;
         m_ctx->graphicsQueue = m_graphics_queue;
+        m_ctx->computeQueue = m_compute_queue;
+        m_ctx->graphicsQueueIndex = m_queue_family_index.graphicsIndex.value();
+        m_ctx->computeQueueIndex = m_queue_family_index.computeIndex.value();
         prepare_quad_display();
         m_fmGenerator = new FrameGeneratorTwo();
         m_fmGenerator->process("D:\\vid.mp4");
@@ -66,6 +69,10 @@ namespace fd {
             m_fmGenerator->get_vid_cv().wait(lock, [this]() -> bool { return m_fmGenerator->is_generator_ready(); });
             FrameHandler::get_instance(m_ctx, m_fmGenerator->get_vid_frame_width(),
                                        m_fmGenerator->get_vid_frame_height());
+            m_computeYuvRgba = new ComputeYuvRgba(m_ctx,
+                                                  R"(D:\cProjects\realTimeFrameDisplay\shaders\yuvRgba.comp.spv)",
+                                                  m_fmGenerator->get_vid_frame_width(),
+                                                  m_fmGenerator->get_vid_frame_height());
         }
 
         create_pipeline();
@@ -187,6 +194,20 @@ namespace fd {
             std::exit(EXIT_FAILURE);
         }
         m_queue_family_index.graphicsIndex = iter - queueFamilyProperties.begin();
+        std::vector<VkQueueFamilyProperties>::iterator iterComp = std::find_if(queueFamilyProperties.begin(),
+                                                                               queueFamilyProperties.end(),
+                                                                               [](VkQueueFamilyProperties pr) -> bool {
+                                                                                   return pr.queueFlags &
+                                                                                          VK_QUEUE_COMPUTE_BIT;
+                                                                               });
+        if (iterComp == queueFamilyProperties.end()) {
+            LOG_INFO("No valid compute queue found");
+        } else {
+            m_queue_family_index.computeIndex = iter - queueFamilyProperties.begin();
+        }
+
+        LOG_INFO("Graphics Queue {} Compute Queue {}", m_queue_family_index.graphicsIndex.value(),
+                 m_queue_family_index.computeIndex.value());
         for (int i = 0; i < queueFamilyProperties.size(); i++) {
             VkBool32 hasPresentationQueue = VK_FALSE;
             vkGetPhysicalDeviceSurfaceSupportKHR(device, i, m_surface, &hasPresentationQueue);
@@ -202,9 +223,10 @@ namespace fd {
 
         float priority = 1.0f;
         std::set<uint32_t> indexes{m_queue_family_index.graphicsIndex.value(),
-                                   m_queue_family_index.presentationIndex.value()};
+                                   m_queue_family_index.presentationIndex.value(),
+                                   m_queue_family_index.computeIndex.value()};
         std::vector<VkDeviceQueueCreateInfo> queueCreateInfos{};
-        for (int i = 0; i < indexes.size(); i++) {
+        for (std::uint32_t i: indexes) {
             VkDeviceQueueCreateInfo deviceQueueCreateInfo{};
             deviceQueueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
             deviceQueueCreateInfo.queueFamilyIndex = i;
@@ -228,6 +250,7 @@ namespace fd {
         vkGetDeviceQueue(m_device.logicalDevice, m_queue_family_index.graphicsIndex.value(), 0, &m_graphics_queue);
         vkGetDeviceQueue(m_device.logicalDevice, m_queue_family_index.presentationIndex.value(), 0,
                          &m_presentation_queue);
+        vkGetDeviceQueue(m_device.logicalDevice, m_queue_family_index.computeIndex.value(), 0, &m_compute_queue);
     }
 
 #pragma endregion
@@ -578,11 +601,13 @@ namespace fd {
             std::unique_ptr<uint8_t[]> yPlane = std::move(videoFrame.yPlane);
             std::unique_ptr<uint8_t[]> vPlane = std::move(videoFrame.vPlane);
             std::unique_ptr<uint8_t[]> uPlane = std::move(videoFrame.uPlane);
+            m_computeYuvRgba->compute(yPlane.get(), uPlane.get(), vPlane.get());
             //Scalar RGBA conversion.
             uint32_t *rgba = new uint32_t[m_fmGenerator->get_vid_frame_width() * m_fmGenerator->get_vid_frame_height()];
             yuv_to_rgba(m_fmGenerator->get_vid_frame_width(), m_fmGenerator->get_vid_frame_height(), yPlane.get(),
                         vPlane.get(), uPlane.get(), rgba);
-            FrameHandler::get_instance(m_ctx, 0, 0)->render(rgba);
+            FrameHandler::get_instance(m_ctx, 0, 0)->render_with_compute_image(m_computeYuvRgba->get_rgba_image(),
+                                                                               m_computeYuvRgba->get_compute_semaphore());
             double pts = videoFrame.pts_seconds;
             double timePassed = std::chrono::duration<double>(
                     std::chrono::steady_clock::now() - m_fmGenerator->frame_start).count();
@@ -603,12 +628,14 @@ namespace fd {
         vkCmdEndRenderPass(m_command_buffer);
         vkEndCommandBuffer(m_command_buffer);
         std::vector<VkPipelineStageFlags> waitFlags{VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+        std::array<VkSemaphore, 1> semaphores{m_get_image_semaphore};
+
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &m_command_buffer;
-        submitInfo.waitSemaphoreCount = 1;
-        submitInfo.pWaitSemaphores = &m_get_image_semaphore;
+        submitInfo.waitSemaphoreCount = semaphores.size();
+        submitInfo.pWaitSemaphores = semaphores.data();
         submitInfo.pWaitDstStageMask = waitFlags.data();
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &m_render_image_semaphore;

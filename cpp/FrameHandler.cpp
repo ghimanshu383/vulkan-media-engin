@@ -31,7 +31,7 @@ namespace fd {
     void FrameHandler::create_buffer_and_images() {
         create_buffer(m_ctx, yPlaneBuffer, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, yPlaneBufferMemory,
                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-                      m_width * m_height * sizeof (uint32_t));
+                      m_width * m_height * sizeof(uint32_t));
         create_image(m_ctx, yPlaneImage, m_width, m_height, yPlaneImageMemory, VK_FORMAT_R8G8B8A8_UNORM,
                      VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         create_image_view(m_ctx->logicalDevice, yPlaneImage, yPlaneImageView, VK_FORMAT_R8G8B8A8_UNORM);
@@ -112,7 +112,7 @@ namespace fd {
         }
     }
 
-    void FrameHandler::render(uint32_t* rgba) {
+    void FrameHandler::render(uint32_t *rgba) {
         if (!isFirstRender) {
             transition_image_layout(m_ctx, m_commandBuffer, yPlaneImage, VK_IMAGE_ASPECT_COLOR_BIT,
                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -122,7 +122,7 @@ namespace fd {
         }
         void *data;
         vkMapMemory(m_ctx->logicalDevice, yPlaneBufferMemory, 0, m_width * m_height, 0, &data);
-        memcpy(data, rgba, m_width * m_height * sizeof (uint32_t));
+        memcpy(data, rgba, m_width * m_height * sizeof(uint32_t));
         vkUnmapMemory(m_ctx->logicalDevice, yPlaneBufferMemory);
 
         buffer_to_image(m_ctx, m_commandBuffer, yPlaneBuffer, yPlaneImage, m_width, m_height, VK_IMAGE_ASPECT_COLOR_BIT,
@@ -134,7 +134,25 @@ namespace fd {
                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
         if (isFirstRender) {
-            isFirstRender = false; }
+            isFirstRender = false;
+        }
+    }
+
+    void FrameHandler::render_with_compute_image(VkImage &rgbaImage, VkSemaphore& computeSemaphore) {
+        if (!isFirstRender) {
+            transition_image_layout(m_ctx, m_commandBuffer, yPlaneImage, VK_IMAGE_ASPECT_COLOR_BIT,
+                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                    0, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                    VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+        }
+            image_to_image(m_ctx, m_commandBuffer, rgbaImage, yPlaneImage, m_width, m_height, computeSemaphore);
+        transition_image_layout(m_ctx, m_commandBuffer, yPlaneImage, VK_IMAGE_ASPECT_COLOR_BIT,
+                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+                                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT,
+                                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        if(isFirstRender) {isFirstRender = false;}
     }
 
     void FrameHandler::cleanup() {
@@ -147,4 +165,6 @@ namespace fd {
         vkFreeMemory(m_ctx->logicalDevice, yPlaneImageMemory, nullptr);
         vkDestroySampler(m_ctx->logicalDevice, m_sampler, nullptr);
     }
+
+
 }

@@ -32,6 +32,8 @@ add_executable(realTimeFrameDisplay main.cpp
         include/FrameHandler.h
         cpp/FrameGeneratorTwo.cpp
         include/FrameGeneratorTwo.h
+        include/VulkanYuvToRgba.h
+        cpp/VulkanYuvToRgba.cpp
 
 )
 

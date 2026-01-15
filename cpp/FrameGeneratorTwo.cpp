@@ -217,7 +217,7 @@ namespace fd {
                 m_audio_render_client->GetBuffer(framesToWrite, &data);
                 memcpy(data, pcm.samples.get(), framesToWrite * 4);
                 m_audio_render_client->ReleaseBuffer(framesToWrite, 0);
-
+                m_audio_clock += (double)framesToWrite / framePtr->nb_samples;
             }
         }};
         audioDecoder.detach();
@@ -256,6 +256,7 @@ namespace fd {
         format.wBitsPerSample = 16;
         format.nBlockAlign = format.nChannels * format.wBitsPerSample / 8;
         format.nAvgBytesPerSec = format.nSamplesPerSec * format.nBlockAlign;
+
 
         REFERENCE_TIME bufferDurationTime = 10000000;
 
