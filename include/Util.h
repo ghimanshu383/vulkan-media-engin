@@ -41,7 +41,10 @@ struct Vertex {
     glm::vec3 pos;
     glm::vec2 uv;
 };
-
+struct ImageExtent {
+    uint32_t width;
+    uint32_t height;
+};
 struct VideoFrame {
     std::unique_ptr<uint8_t[]> yPlane;
     std::unique_ptr<uint8_t[]> uPlane;
@@ -177,10 +180,15 @@ submit_queue(fd::RenderContext *ctx, VkCommandBuffer commandBuffer, VkSemaphore 
     submitInfo.pWaitSemaphores = &waitSemaphore;
     submitInfo.pWaitDstStageMask = waitSemaphore == VK_NULL_HANDLE ? nullptr : waitFlags.data();
 
-    vkResetFences(ctx->logicalDevice, 1, &fence);
-    vkQueueSubmit(ctx->graphicsQueue, 1, &submitInfo, fence);
-    vkWaitForFences(ctx->logicalDevice, 1, &fence, VK_TRUE, UINT32_MAX);
-    vkDestroyFence(ctx->logicalDevice, fence, nullptr);
+    if (waitSemaphore == VK_NULL_HANDLE) {
+        vkResetFences(ctx->logicalDevice, 1, &fence);
+        vkQueueSubmit(ctx->graphicsQueue, 1, &submitInfo, fence);
+        vkWaitForFences(ctx->logicalDevice, 1, &fence, VK_TRUE, UINT32_MAX);
+        vkDestroyFence(ctx->logicalDevice, fence, nullptr);
+    } else {
+        vkQueueSubmit(ctx->graphicsQueue, 1, &submitInfo, nullptr);
+    }
+
 }
 
 inline void
@@ -275,6 +283,22 @@ buffer_to_image(fd::RenderContext *ctx, VkCommandBuffer commandBuffer, VkBuffer 
     submit_queue(ctx, commandBuffer);
 }
 
+inline void record_buffer_to_image(VkCommandBuffer commandBuffer, VkBuffer &srcBuffer, VkImage dstImage,
+                                   uint32_t width, uint32_t height, VkImageAspectFlags aspectFlags,
+                                   VkImageLayout dstLayout) {
+    VkBufferImageCopy bufferImageCopy{};
+    bufferImageCopy.imageExtent = {width, height, 1};
+    bufferImageCopy.bufferOffset = 0;
+    bufferImageCopy.imageOffset = {0, 0};
+    bufferImageCopy.bufferImageHeight = 0;
+    bufferImageCopy.bufferRowLength = 0;
+    bufferImageCopy.imageSubresource.layerCount = 1;
+    bufferImageCopy.imageSubresource.baseArrayLayer = 0;
+    bufferImageCopy.imageSubresource.aspectMask = aspectFlags;
+    bufferImageCopy.imageSubresource.mipLevel = 0;
+    vkCmdCopyBufferToImage(commandBuffer, srcBuffer, dstImage, dstLayout, 1, &bufferImageCopy);
+}
+
 inline void
 transition_image_layout(fd::RenderContext *ctx, VkCommandBuffer commandBuffer, VkImage image,
                         VkImageAspectFlags aspectFlags, VkImageLayout oldLayout,
@@ -313,7 +337,7 @@ transition_image_layout(fd::RenderContext *ctx, VkCommandBuffer commandBuffer, V
 inline void
 image_to_image(fd::RenderContext *ctx, VkCommandBuffer commandBuffer, VkImage &srcImage, VkImage &dstImage,
                uint32_t width,
-               uint32_t height, VkSemaphore& waitSemaphore) {
+               uint32_t height, VkSemaphore waitSemaphore = VK_NULL_HANDLE) {
     VkImageCopy region{};
     region.srcOffset = {0, 0};
     region.dstOffset = {0, 0};
@@ -334,7 +358,52 @@ image_to_image(fd::RenderContext *ctx, VkCommandBuffer commandBuffer, VkImage &s
     vkCmdCopyImage(commandBuffer, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstImage,
                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
     submit_queue(ctx, commandBuffer, waitSemaphore);
+}
 
+inline void record_image_to_image(VkCommandBuffer commandBuffer, VkImage &srcImage, VkImage &dstImage,
+                                  uint32_t width,
+                                  uint32_t height) {
+    VkImageCopy region{};
+    region.srcOffset = {0, 0};
+    region.dstOffset = {0, 0};
+    region.extent = {width, height, 1};
+    region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.srcSubresource.layerCount = 1;
+    region.srcSubresource.baseArrayLayer = 0;
+    region.srcSubresource.mipLevel = 0;
+    region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.dstSubresource.layerCount = 1;
+    region.dstSubresource.baseArrayLayer = 0;
+    region.dstSubresource.mipLevel = 0;
+
+    vkCmdCopyImage(commandBuffer, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstImage,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+}
+
+inline void record_transition_image(VkCommandBuffer commandBuffer, VkImage image,
+                                    VkImageAspectFlags aspectFlags, VkImageLayout oldLayout,
+                                    VkImageLayout newLayout, VkAccessFlags srcAccess, VkPipelineStageFlags srcStage,
+                                    VkAccessFlags dstAccess, VkPipelineStageFlags dstStage,
+                                    uint32_t srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                                    uint32_t dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED) {
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.image = image;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.aspectMask = aspectFlags;
+    barrier.srcQueueFamilyIndex = srcQueueFamilyIndex;
+    barrier.dstQueueFamilyIndex = dstQueueFamilyIndex;
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout;
+    barrier.srcAccessMask = srcAccess;
+    barrier.dstAccessMask = dstAccess;
+    vkCmdPipelineBarrier(commandBuffer, srcStage, dstStage, 0,
+                         0, nullptr,
+                         0, nullptr,
+                         1, &barrier);
 }
 
 inline void create_sampler(VkDevice logicalDevice, VkSampler &sampler) {
@@ -350,6 +419,7 @@ inline void create_sampler(VkDevice logicalDevice, VkSampler &sampler) {
 
     VK_CHECK(vkCreateSampler(logicalDevice, &samplerCreateInfo, nullptr, &sampler),
              "failed to create the sampler");
+
 }
 
 #endif //REALTIMEFRAMEDISPLAY_UTIL_H

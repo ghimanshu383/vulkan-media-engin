@@ -3,6 +3,8 @@ project(realTimeFrameDisplay)
 
 set(CMAKE_CXX_STANDARD 17)
 
+#add_subdirectory(shared)
+
 include(FetchContent)
 FetchContent_Declare(glfw
         GIT_REPOSITORY https://github.com/glfw/glfw.git
@@ -10,6 +12,7 @@ FetchContent_Declare(glfw
         GIT_SHALLOW FALSE
 )
 FetchContent_MakeAvailable(glfw)
+find_package(common REQUIRED)
 
 FetchContent_Declare(
         spdlog
@@ -32,9 +35,10 @@ add_executable(realTimeFrameDisplay main.cpp
         include/FrameHandler.h
         cpp/FrameGeneratorTwo.cpp
         include/FrameGeneratorTwo.h
-        include/VulkanYuvToRgba.h
-        cpp/VulkanYuvToRgba.cpp
-
+        include/computes/VulkanYuvToRgba.h
+        cpp/computes/VulkanYuvToRgba.cpp
+        include/computes/VulkanFilterR8Image.h
+        cpp/computes/VulkanFilterR8Image.cpp
 )
 
 target_include_directories(realTimeFrameDisplay PUBLIC
@@ -53,4 +57,17 @@ target_link_libraries(realTimeFrameDisplay PUBLIC
         D:\\VulkanSDK\\1.3.283.0\\Lib\\vulkan-1.lib
         ole32
         uuid
+        common::common
+        common::common2
 )
+
+function(copyDLL target src)
+    add_custom_command(TARGET ${target}
+            POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy
+            $<TARGET_FILE:${src}>
+            $<TARGET_FILE_DIR:${target}>
+    )
+endfunction()
+copyDLL(realTimeFrameDisplay common::common)
+copyDLL(realTimeFrameDisplay common::common2)

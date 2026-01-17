@@ -31,6 +31,7 @@ namespace fd {
         std::vector<VkDescriptorSet> m_des_sets{};
         VkSampler m_sampler{};
         VkCommandBuffer m_commandBuffer{};
+        VkSemaphore m_frame_handler_semaphore{};
         bool isFirstRender = true;
 
         void create_buffer_and_images();
@@ -43,11 +44,13 @@ namespace fd {
 
         void render(uint32_t *rgba);
 
-        void render_with_compute_image(VkImage &rgbaImage, VkSemaphore& computeSemaphore);
+        void render_with_compute_image(VkImage &rgbaImage, VkSemaphore &computeSemaphore);
 
         VkDescriptorSetLayout &get_des_layout() { return m_des_layout; }
 
         std::vector<VkDescriptorSet> &get_des_sets() { return m_des_sets; }
+
+        VkSemaphore &get_frame_handler_semaphore() { return m_frame_handler_semaphore; }
 
         void cleanup();
 

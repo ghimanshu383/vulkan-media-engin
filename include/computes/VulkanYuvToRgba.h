@@ -7,6 +7,7 @@
 
 #include <vulkan/vulkan.h>
 #include "Util.h"
+#include "computes/VulkanFilterR8Image.h"
 
 namespace fd {
     class ComputeYuvRgba {
@@ -47,12 +48,14 @@ namespace fd {
         VkCommandBuffer m_commandBuffer{};
         VkCommandBuffer m_commandBuffer_dispatch{};
         VkSemaphore m_compute_semaphore{};
-        VkFence m_compute_fence{};
+        VkSemaphore m_filter_semaphore{};
 
         void *yData;
         void *uData;
         void *vData;
         bool firstRender = true;
+
+        VulkanFilterR8* m_blur = nullptr;
 
         void prepare_buffers_and_images();
 
@@ -64,6 +67,8 @@ namespace fd {
 
         void dispatch();
 
+        void invoke_r8_filters();
+
     public:
         ComputeYuvRgba(RenderContext *ctx, const char *shaderPath, uint32_t width, uint32_t height);
 
@@ -72,6 +77,7 @@ namespace fd {
         VkSemaphore &get_compute_semaphore() { return m_compute_semaphore; };
 
         VkImage &get_rgba_image() { return m_rgba_image; }
+        VkImage &get_y_image() { return m_y_image; }
     };
 }
 #endif //REALTIMEFRAMEDISPLAY_VULKANYUVTORGBA_H

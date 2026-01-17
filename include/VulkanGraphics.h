@@ -11,7 +11,9 @@
 #include <optional>
 #include "FrameHandler.h"
 #include "FrameGeneratorTwo.h"
-#include "VulkanYuvToRgba.h"
+#include "computes/VulkanYuvToRgba.h"
+#include "computes/VulkanFilterR8Image.h"
+
 namespace fd {
     class VulkanGraphics {
     private:
@@ -25,6 +27,7 @@ namespace fd {
         std::condition_variable m_cv_graphics;
         std::mutex _mutex;
         ComputeYuvRgba* m_computeYuvRgba = nullptr;
+
 
 #pragma region INSTANCE_AND_VALIDATION
         VkInstance m_instance{};

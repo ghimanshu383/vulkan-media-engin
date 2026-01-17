@@ -11,8 +11,11 @@
 #include "Util.h"
 #include "FrameGeneratorTwo.h"
 
+__declspec(dllimport) void print_simple_message_two(const char *val);
+
 namespace fd {
     VulkanGraphics::VulkanGraphics(GLFWwindow *window) : m_window{window} {
+        print_simple_message_two("Hello world");
         init();
     }
 
@@ -603,11 +606,12 @@ namespace fd {
             std::unique_ptr<uint8_t[]> uPlane = std::move(videoFrame.uPlane);
             m_computeYuvRgba->compute(yPlane.get(), uPlane.get(), vPlane.get());
             //Scalar RGBA conversion.
-            uint32_t *rgba = new uint32_t[m_fmGenerator->get_vid_frame_width() * m_fmGenerator->get_vid_frame_height()];
-            yuv_to_rgba(m_fmGenerator->get_vid_frame_width(), m_fmGenerator->get_vid_frame_height(), yPlane.get(),
-                        vPlane.get(), uPlane.get(), rgba);
+   //         uint32_t *rgba = new uint32_t[m_fmGenerator->get_vid_frame_width() * m_fmGenerator->get_vid_frame_height()];
+//            yuv_to_rgba(m_fmGenerator->get_vid_frame_width(), m_fmGenerator->get_vid_frame_height(), yPlane.get(),
+//                        vPlane.get(), uPlane.get(), rgba);
             FrameHandler::get_instance(m_ctx, 0, 0)->render_with_compute_image(m_computeYuvRgba->get_rgba_image(),
                                                                                m_computeYuvRgba->get_compute_semaphore());
+            //FrameHandler::get_instance(m_ctx, 0, 0)->render(rgba);
             double pts = videoFrame.pts_seconds;
             double timePassed = std::chrono::duration<double>(
                     std::chrono::steady_clock::now() - m_fmGenerator->frame_start).count();
@@ -617,7 +621,7 @@ namespace fd {
             } else if (pts < timePassed) {
                 LOG_INFO("Bad Frame");
             }
-            delete[] rgba;
+          //  delete[] rgba;
 
         }
 
@@ -627,8 +631,8 @@ namespace fd {
     void VulkanGraphics::end_frame() {
         vkCmdEndRenderPass(m_command_buffer);
         vkEndCommandBuffer(m_command_buffer);
-        std::vector<VkPipelineStageFlags> waitFlags{VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-        std::array<VkSemaphore, 1> semaphores{m_get_image_semaphore};
+        std::vector<VkPipelineStageFlags> waitFlags{VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT};
+        std::array<VkSemaphore, 2> semaphores{m_get_image_semaphore, FrameHandler::get_instance(m_ctx, 0, 0)->get_frame_handler_semaphore()};
 
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;

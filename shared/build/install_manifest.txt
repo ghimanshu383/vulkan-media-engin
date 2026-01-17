@@ -1,0 +1,8 @@
+C:/Program Files (x86)/common/lib/common.lib
+C:/Program Files (x86)/common/bin/common.dll
+C:/Program Files (x86)/common/lib/common2.lib
+C:/Program Files (x86)/common/bin/common2.dll
+C:/Program Files (x86)/common/include/test.h
+C:/Program Files (x86)/common/lib/cmake/common/commonTargets.cmake
+C:/Program Files (x86)/common/lib/cmake/common/commonTargets-release.cmake
+C:/Program Files (x86)/common/lib/cmake/common/commonConfig.cmake

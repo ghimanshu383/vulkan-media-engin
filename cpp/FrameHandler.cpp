@@ -26,6 +26,9 @@ namespace fd {
         for (VkDescriptorSet &des: m_des_sets) {
             ctx->desSetFrame.push_back(des);
         }
+        VkSemaphoreCreateInfo semaphoreCreateInfo{};
+        semaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        vkCreateSemaphore(m_ctx->logicalDevice, &semaphoreCreateInfo, nullptr, &m_frame_handler_semaphore);
     };
 
     void FrameHandler::create_buffer_and_images() {
@@ -138,21 +141,37 @@ namespace fd {
         }
     }
 
-    void FrameHandler::render_with_compute_image(VkImage &rgbaImage, VkSemaphore& computeSemaphore) {
+    void FrameHandler::render_with_compute_image(VkImage &rgbaImage, VkSemaphore &computeSemaphore) {
+        vkResetCommandBuffer(m_commandBuffer, 0);
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        vkBeginCommandBuffer(m_commandBuffer, &beginInfo);
         if (!isFirstRender) {
-            transition_image_layout(m_ctx, m_commandBuffer, yPlaneImage, VK_IMAGE_ASPECT_COLOR_BIT,
+            record_transition_image(m_commandBuffer, yPlaneImage, VK_IMAGE_ASPECT_COLOR_BIT,
                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                     0, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                                     VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
         }
-            image_to_image(m_ctx, m_commandBuffer, rgbaImage, yPlaneImage, m_width, m_height, computeSemaphore);
-        transition_image_layout(m_ctx, m_commandBuffer, yPlaneImage, VK_IMAGE_ASPECT_COLOR_BIT,
+        record_image_to_image(m_commandBuffer, rgbaImage, yPlaneImage, m_width, m_height);
+        record_transition_image(m_commandBuffer, yPlaneImage, VK_IMAGE_ASPECT_COLOR_BIT,
                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
                                 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT,
                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-        if(isFirstRender) {isFirstRender = false;}
+        vkEndCommandBuffer(m_commandBuffer);
+        VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &m_commandBuffer;
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = &computeSemaphore;
+        submitInfo.pWaitDstStageMask = &waitStage;
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = &m_frame_handler_semaphore;
+        vkQueueSubmit(m_ctx->graphicsQueue, 1, &submitInfo, nullptr);
+        if (isFirstRender) { isFirstRender = false; }
     }
 
     void FrameHandler::cleanup() {
@@ -164,7 +183,6 @@ namespace fd {
         vkDestroyImage(m_ctx->logicalDevice, yPlaneImage, nullptr);
         vkFreeMemory(m_ctx->logicalDevice, yPlaneImageMemory, nullptr);
         vkDestroySampler(m_ctx->logicalDevice, m_sampler, nullptr);
+        vkDestroySemaphore(m_ctx->logicalDevice, m_frame_handler_semaphore, nullptr);
     }
-
-
 }

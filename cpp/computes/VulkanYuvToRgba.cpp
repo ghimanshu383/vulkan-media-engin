@@ -2,7 +2,7 @@
 // Created by ghima on 15-01-2026.
 //
 #include <array>
-#include "VulkanYuvToRgba.h"
+#include "computes/VulkanYuvToRgba.h"
 
 namespace fd {
     ComputeYuvRgba::ComputeYuvRgba(RenderContext *ctx, const char *shaderPath, uint32_t width, uint32_t height) : m_ctx{
@@ -14,16 +14,15 @@ namespace fd {
         VkSemaphoreCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
         vkCreateSemaphore(m_ctx->logicalDevice, &createInfo, nullptr, &m_compute_semaphore);
-        VkFenceCreateInfo fenceCreateInfo{};
-        fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-        vkCreateFence(m_ctx->logicalDevice, &fenceCreateInfo, nullptr, &m_compute_fence);
-
+        vkCreateSemaphore(m_ctx->logicalDevice, &createInfo, nullptr, &m_filter_semaphore);
         prepare_buffers_and_images();
         create_samplers();
         setup_descriptors();
         create_pipeline();
 
+        m_blur = new VulkanFilterR8(m_ctx,
+                                    R"(D:\cProjects\realTimeFrameDisplay\shaders\gaussianBlurCompute.comp.spv)",
+                                    m_width, m_height);
         vkMapMemory(m_ctx->logicalDevice, m_y_plane_buffer_memory, 0, m_width * m_height, 0, &yData);
         vkMapMemory(m_ctx->logicalDevice, m_u_plane_buffer_memory, 0, (m_width >> 1) * (m_height >> 1), 0, &uData);
         vkMapMemory(m_ctx->logicalDevice, m_v_plane_buffer_memory, 0, (m_width >> 1) * (m_height >> 1), 0, &vData);
@@ -43,7 +42,8 @@ namespace fd {
 
         // Creating the images and views.
         create_image(m_ctx, m_y_image, m_width, m_height, m_y_image_memory, VK_FORMAT_R8_UNORM,
-                     VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+                     VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         create_image_view(m_ctx->logicalDevice, m_y_image, m_y_image_view, VK_FORMAT_R8_UNORM);
 
         create_image(m_ctx, m_u_image, chromaW, chromaH, m_u_image_memory, VK_FORMAT_R8_UNORM,
@@ -203,20 +203,25 @@ namespace fd {
     }
 
     void ComputeYuvRgba::compute(uint8_t *yPlane, uint8_t *uPlane, uint8_t *vPlane) {
+        vkResetCommandBuffer(m_commandBuffer, 0);
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        VK_CHECK(vkBeginCommandBuffer(m_commandBuffer, &beginInfo), "Failed to begin the command buffer");
+
         if (!firstRender) {
-            transition_image_layout(m_ctx, m_commandBuffer, m_y_image, VK_IMAGE_ASPECT_COLOR_BIT,
+            record_transition_image(m_commandBuffer, m_y_image, VK_IMAGE_ASPECT_COLOR_BIT,
                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                     0, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
                                     VK_PIPELINE_STAGE_TRANSFER_BIT);
-            transition_image_layout(m_ctx, m_commandBuffer, m_u_image, VK_IMAGE_ASPECT_COLOR_BIT,
+            record_transition_image(m_commandBuffer, m_u_image, VK_IMAGE_ASPECT_COLOR_BIT,
                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                     0, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
                                     VK_PIPELINE_STAGE_TRANSFER_BIT);
-            transition_image_layout(m_ctx, m_commandBuffer, m_v_image, VK_IMAGE_ASPECT_COLOR_BIT,
+            record_transition_image(m_commandBuffer, m_v_image, VK_IMAGE_ASPECT_COLOR_BIT,
                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                     0, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
                                     VK_PIPELINE_STAGE_TRANSFER_BIT);
-            transition_image_layout(m_ctx, m_commandBuffer, m_rgba_image, VK_IMAGE_ASPECT_COLOR_BIT,
+            record_transition_image(m_commandBuffer, m_rgba_image, VK_IMAGE_ASPECT_COLOR_BIT,
                                     VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
                                     0, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_ACCESS_SHADER_WRITE_BIT,
                                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, m_ctx->graphicsQueueIndex,
@@ -226,33 +231,49 @@ namespace fd {
         memcpy(uData, uPlane, (m_width >> 1) * (m_height >> 1));
         memcpy(vData, vPlane, (m_width >> 1) * (m_height >> 1));
 
-        buffer_to_image(m_ctx, m_commandBuffer, m_y_plane_buffer, m_y_image, m_width, m_height,
-                        VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        buffer_to_image(m_ctx, m_commandBuffer, m_u_plane_buffer, m_u_image, (m_width >> 1), (m_height >> 1),
-                        VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        buffer_to_image(m_ctx, m_commandBuffer, m_v_plane_buffer, m_v_image, (m_width >> 1), (m_height >> 1),
-                        VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        transition_image_layout(m_ctx, m_commandBuffer, m_y_image, VK_IMAGE_ASPECT_COLOR_BIT,
+        record_buffer_to_image(m_commandBuffer, m_y_plane_buffer, m_y_image, m_width, m_height,
+                               VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        record_buffer_to_image(m_commandBuffer, m_u_plane_buffer, m_u_image, (m_width >> 1), (m_height >> 1),
+                               VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        record_buffer_to_image(m_commandBuffer, m_v_plane_buffer, m_v_image, (m_width >> 1), (m_height >> 1),
+                               VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        record_transition_image(m_commandBuffer, m_y_image, VK_IMAGE_ASPECT_COLOR_BIT,
                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                                 VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT,
                                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-        transition_image_layout(m_ctx, m_commandBuffer, m_u_image, VK_IMAGE_ASPECT_COLOR_BIT,
+        record_transition_image(m_commandBuffer, m_u_image, VK_IMAGE_ASPECT_COLOR_BIT,
                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                                 VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT,
                                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-        transition_image_layout(m_ctx, m_commandBuffer, m_v_image, VK_IMAGE_ASPECT_COLOR_BIT,
+        record_transition_image(m_commandBuffer, m_v_image, VK_IMAGE_ASPECT_COLOR_BIT,
                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                                 VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT,
                                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+
+        // record all filters for the yplane here.
+
+        vkEndCommandBuffer(m_commandBuffer);
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &m_commandBuffer;
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = &m_filter_semaphore;
+
+        vkQueueSubmit(m_ctx->computeQueue, 1, &submitInfo, nullptr);
         dispatch();
         if (firstRender) {
             firstRender = false;
         }
     }
 
+    void ComputeYuvRgba::invoke_r8_filters() {
+
+    }
+
     void ComputeYuvRgba::dispatch() {
-        vkWaitForFences(m_ctx->logicalDevice, 1, &m_compute_fence, VK_TRUE, UINT32_MAX);
-        vkResetFences(m_ctx->logicalDevice, 1, &m_compute_fence);
+//        vkWaitForFences(m_ctx->logicalDevice, 1, &m_compute_fence, VK_TRUE, UINT32_MAX);
+//        vkResetFences(m_ctx->logicalDevice, 1, &m_compute_fence);
 
         vkResetCommandBuffer(m_commandBuffer_dispatch, 0);
         VkCommandBufferBeginInfo beginInfo{};
@@ -264,20 +285,25 @@ namespace fd {
                                 &m_des_set, 0,
                                 nullptr);
         vkCmdDispatch(m_commandBuffer_dispatch, (m_width + 7) / 8, (m_height + 7) / 8, 1);
-        vkEndCommandBuffer(m_commandBuffer_dispatch);
-
-        VkSubmitInfo submitInfo{};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &m_commandBuffer_dispatch;
-        submitInfo.signalSemaphoreCount = 1;
-        submitInfo.pSignalSemaphores = &m_compute_semaphore;
-
-        vkQueueSubmit(m_ctx->computeQueue, 1, &submitInfo, m_compute_fence);
-        transition_image_layout(m_ctx, m_commandBuffer, m_rgba_image, VK_IMAGE_ASPECT_COLOR_BIT,
+        record_transition_image(m_commandBuffer_dispatch, m_rgba_image, VK_IMAGE_ASPECT_COLOR_BIT,
                                 VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                 VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                 VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                                 m_ctx->computeQueueIndex, m_ctx->graphicsQueueIndex);
+        vkEndCommandBuffer(m_commandBuffer_dispatch);
+
+        VkPipelineStageFlags waitFlags = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &m_commandBuffer_dispatch;
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = &m_filter_semaphore;
+        submitInfo.pWaitDstStageMask = &waitFlags;
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = &m_compute_semaphore;
+
+        vkQueueSubmit(m_ctx->computeQueue, 1, &submitInfo, nullptr);
+
     }
 }

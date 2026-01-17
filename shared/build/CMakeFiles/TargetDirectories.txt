@@ -1,0 +1,5 @@
+D:/cProjects/realTimeFrameDisplay/shared/build/CMakeFiles/common.dir
+D:/cProjects/realTimeFrameDisplay/shared/build/CMakeFiles/common2.dir
+D:/cProjects/realTimeFrameDisplay/shared/build/CMakeFiles/INSTALL.dir
+D:/cProjects/realTimeFrameDisplay/shared/build/CMakeFiles/ALL_BUILD.dir
+D:/cProjects/realTimeFrameDisplay/shared/build/CMakeFiles/ZERO_CHECK.dir
