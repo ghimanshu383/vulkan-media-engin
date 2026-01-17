@@ -35,6 +35,7 @@ namespace fd {
         VkImageView m_rgba_image_view{};
         VkDeviceMemory m_rgba_image_memory{};
 
+
         VkPipeline m_pipeline{};
         VkPipelineLayout m_pipeline_layout{};
         VkDescriptorSetLayout m_des_layout{};
@@ -47,6 +48,9 @@ namespace fd {
 
         VkCommandBuffer m_commandBuffer{};
         VkCommandBuffer m_commandBuffer_dispatch{};
+        VkCommandBuffer m_compute_command_buffer{};
+        VkCommandPool m_compute_command_pool {};
+
         VkSemaphore m_compute_semaphore{};
         VkSemaphore m_filter_semaphore{};
 
@@ -57,6 +61,7 @@ namespace fd {
 
         VulkanFilterR8* m_blur = nullptr;
 
+        void set_up_compute_command_buffer();
         void prepare_buffers_and_images();
 
         void create_pipeline();
@@ -69,6 +74,7 @@ namespace fd {
 
         void invoke_r8_filters();
 
+
     public:
         ComputeYuvRgba(RenderContext *ctx, const char *shaderPath, uint32_t width, uint32_t height);
 
@@ -78,6 +84,7 @@ namespace fd {
 
         VkImage &get_rgba_image() { return m_rgba_image; }
         VkImage &get_y_image() { return m_y_image; }
+        void clean_up();
     };
 }
 #endif //REALTIMEFRAMEDISPLAY_VULKANYUVTORGBA_H

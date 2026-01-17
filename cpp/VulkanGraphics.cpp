@@ -22,8 +22,10 @@ namespace fd {
     VulkanGraphics::~VulkanGraphics() {
         vkDeviceWaitIdle(m_device.logicalDevice);
         FrameHandler::get_instance(m_ctx, 0, 0)->cleanup();
+        m_computeYuvRgba->clean_up();
         delete m_fmGenerator;
         delete m_ctx;
+        delete m_computeYuvRgba;
         vkDestroyBuffer(m_device.logicalDevice, quadVertBuffer, nullptr);
         vkFreeMemory(m_device.logicalDevice, vertBufferMemory, nullptr);
         vkDestroyBuffer(m_device.logicalDevice, quadIndexBuffer, nullptr);

@@ -10,11 +10,11 @@ namespace fd {
                                                                                                                   m_height{
                                                                                                                           height} {
         m_commandBuffer = start_command_buffer(m_ctx);
-        m_commandBuffer_dispatch = start_command_buffer(m_ctx);
         VkSemaphoreCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
         vkCreateSemaphore(m_ctx->logicalDevice, &createInfo, nullptr, &m_compute_semaphore);
         vkCreateSemaphore(m_ctx->logicalDevice, &createInfo, nullptr, &m_filter_semaphore);
+        set_up_compute_command_buffer();
         prepare_buffers_and_images();
         create_samplers();
         setup_descriptors();
@@ -203,25 +203,25 @@ namespace fd {
     }
 
     void ComputeYuvRgba::compute(uint8_t *yPlane, uint8_t *uPlane, uint8_t *vPlane) {
-        vkResetCommandBuffer(m_commandBuffer, 0);
+        vkResetCommandBuffer(m_compute_command_buffer, 0);
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        VK_CHECK(vkBeginCommandBuffer(m_commandBuffer, &beginInfo), "Failed to begin the command buffer");
+        VK_CHECK(vkBeginCommandBuffer(m_compute_command_buffer, &beginInfo), "Failed to begin the command buffer");
 
         if (!firstRender) {
-            record_transition_image(m_commandBuffer, m_y_image, VK_IMAGE_ASPECT_COLOR_BIT,
+            record_transition_image(m_compute_command_buffer, m_y_image, VK_IMAGE_ASPECT_COLOR_BIT,
                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                     0, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
                                     VK_PIPELINE_STAGE_TRANSFER_BIT);
-            record_transition_image(m_commandBuffer, m_u_image, VK_IMAGE_ASPECT_COLOR_BIT,
+            record_transition_image(m_compute_command_buffer, m_u_image, VK_IMAGE_ASPECT_COLOR_BIT,
                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                     0, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
                                     VK_PIPELINE_STAGE_TRANSFER_BIT);
-            record_transition_image(m_commandBuffer, m_v_image, VK_IMAGE_ASPECT_COLOR_BIT,
+            record_transition_image(m_compute_command_buffer, m_v_image, VK_IMAGE_ASPECT_COLOR_BIT,
                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                     0, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
                                     VK_PIPELINE_STAGE_TRANSFER_BIT);
-            record_transition_image(m_commandBuffer, m_rgba_image, VK_IMAGE_ASPECT_COLOR_BIT,
+            record_transition_image(m_compute_command_buffer, m_rgba_image, VK_IMAGE_ASPECT_COLOR_BIT,
                                     VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
                                     0, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_ACCESS_SHADER_WRITE_BIT,
                                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, m_ctx->graphicsQueueIndex,
@@ -231,32 +231,34 @@ namespace fd {
         memcpy(uData, uPlane, (m_width >> 1) * (m_height >> 1));
         memcpy(vData, vPlane, (m_width >> 1) * (m_height >> 1));
 
-        record_buffer_to_image(m_commandBuffer, m_y_plane_buffer, m_y_image, m_width, m_height,
+        record_buffer_to_image(m_compute_command_buffer, m_y_plane_buffer, m_y_image, m_width, m_height,
                                VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        record_buffer_to_image(m_commandBuffer, m_u_plane_buffer, m_u_image, (m_width >> 1), (m_height >> 1),
+        record_buffer_to_image(m_compute_command_buffer, m_u_plane_buffer, m_u_image, (m_width >> 1), (m_height >> 1),
                                VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        record_buffer_to_image(m_commandBuffer, m_v_plane_buffer, m_v_image, (m_width >> 1), (m_height >> 1),
+        record_buffer_to_image(m_compute_command_buffer, m_v_plane_buffer, m_v_image, (m_width >> 1), (m_height >> 1),
                                VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        record_transition_image(m_commandBuffer, m_y_image, VK_IMAGE_ASPECT_COLOR_BIT,
+
+        record_transition_image(m_compute_command_buffer, m_u_image, VK_IMAGE_ASPECT_COLOR_BIT,
                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                                 VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT,
                                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-        record_transition_image(m_commandBuffer, m_u_image, VK_IMAGE_ASPECT_COLOR_BIT,
-                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT,
-                                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-        record_transition_image(m_commandBuffer, m_v_image, VK_IMAGE_ASPECT_COLOR_BIT,
+        record_transition_image(m_compute_command_buffer, m_v_image, VK_IMAGE_ASPECT_COLOR_BIT,
                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                                 VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT,
                                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 
         // record all filters for the yplane here.
+        invoke_r8_filters();
 
-        vkEndCommandBuffer(m_commandBuffer);
+        record_transition_image(m_compute_command_buffer, m_y_image, VK_IMAGE_ASPECT_COLOR_BIT,
+                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT,
+                                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+        vkEndCommandBuffer(m_compute_command_buffer);
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &m_commandBuffer;
+        submitInfo.pCommandBuffers = &m_compute_command_buffer;
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &m_filter_semaphore;
 
@@ -268,7 +270,7 @@ namespace fd {
     }
 
     void ComputeYuvRgba::invoke_r8_filters() {
-
+        m_blur->compute(m_compute_command_buffer, m_y_image);
     }
 
     void ComputeYuvRgba::dispatch() {
@@ -305,5 +307,58 @@ namespace fd {
 
         vkQueueSubmit(m_ctx->computeQueue, 1, &submitInfo, nullptr);
 
+    }
+
+    void ComputeYuvRgba::set_up_compute_command_buffer() {
+        VkCommandPoolCreateInfo commandPoolCreateInfo{};
+        commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        commandPoolCreateInfo.queueFamilyIndex = m_ctx->graphicsQueueIndex;
+        commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        vkCreateCommandPool(m_ctx->logicalDevice, &commandPoolCreateInfo, nullptr, &m_compute_command_pool);
+
+        VkCommandBufferAllocateInfo allocateInfo{};
+        allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocateInfo.commandBufferCount = 1;
+        allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocateInfo.commandPool = m_compute_command_pool;
+        VK_CHECK(vkAllocateCommandBuffers(m_ctx->logicalDevice, &allocateInfo, &m_compute_command_buffer),
+                 "Failed to allocate the compute command buffers");
+        VK_CHECK(vkAllocateCommandBuffers(m_ctx->logicalDevice, &allocateInfo, &m_commandBuffer_dispatch),
+                 "Failed to allocate the compute command buffers");
+    }
+
+    void ComputeYuvRgba::clean_up() {
+        vkDestroyBuffer(m_ctx->logicalDevice, m_y_plane_buffer, nullptr);
+        vkDestroyBuffer(m_ctx->logicalDevice, m_v_plane_buffer, nullptr);
+        vkDestroyBuffer(m_ctx->logicalDevice, m_u_plane_buffer, nullptr);
+        vkFreeMemory(m_ctx->logicalDevice, m_y_plane_buffer_memory, nullptr);
+        vkFreeMemory(m_ctx->logicalDevice, m_v_plane_buffer_memory, nullptr);
+        vkFreeMemory(m_ctx->logicalDevice, m_u_plane_buffer_memory, nullptr);
+        vkDestroyImageView(m_ctx->logicalDevice, m_y_image_view, nullptr);
+        vkDestroyImage(m_ctx->logicalDevice, m_y_image, nullptr);
+        vkFreeMemory(m_ctx->logicalDevice, m_y_image_memory, nullptr);
+        vkDestroyImageView(m_ctx->logicalDevice, m_u_image_view, nullptr);
+        vkDestroyImage(m_ctx->logicalDevice, m_u_image, nullptr);
+        vkFreeMemory(m_ctx->logicalDevice, m_u_image_memory, nullptr);
+        vkDestroyImageView(m_ctx->logicalDevice, m_v_image_view, nullptr);
+        vkDestroyImage(m_ctx->logicalDevice, m_v_image, nullptr);
+        vkFreeMemory(m_ctx->logicalDevice, m_v_image_memory, nullptr);
+        vkDestroyImageView(m_ctx->logicalDevice, m_rgba_image_view, nullptr);
+        vkDestroyImage(m_ctx->logicalDevice, m_rgba_image, nullptr);
+        vkFreeMemory(m_ctx->logicalDevice, m_rgba_image_memory, nullptr);
+
+        vkDestroyPipeline(m_ctx->logicalDevice, m_pipeline, nullptr);
+        vkDestroyPipelineLayout(m_ctx->logicalDevice, m_pipeline_layout, nullptr);
+        vkDestroyDescriptorSetLayout(m_ctx->logicalDevice, m_des_layout, nullptr);
+        vkDestroyDescriptorPool(m_ctx->logicalDevice, m_des_pool, nullptr);
+
+        vkDestroySampler(m_ctx->logicalDevice, m_sampler_y, nullptr);
+        vkDestroySampler(m_ctx->logicalDevice, m_sampler_u, nullptr);
+        vkDestroySampler(m_ctx->logicalDevice, m_sampler_v, nullptr);
+        vkDestroySampler(m_ctx->logicalDevice, m_sampler_rgba, nullptr);
+        vkDestroySemaphore(m_ctx->logicalDevice, m_filter_semaphore, nullptr);
+        vkDestroySemaphore(m_ctx->logicalDevice, m_compute_semaphore, nullptr);
+        vkDestroyCommandPool(m_ctx->logicalDevice, m_compute_command_pool, nullptr);
+        m_blur->cleanup();
     }
 }
