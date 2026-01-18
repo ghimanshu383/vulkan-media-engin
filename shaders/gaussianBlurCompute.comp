@@ -3,20 +3,61 @@
 layout (local_size_x = 8) in;
 layout (local_size_y = 8) in;
 
-layout(set = 0, binding = 0) uniform sampler2D inImage;
+layout (set = 0, binding = 0) uniform sampler2D inImage;
 layout (set = 0, binding = 1, r8) uniform writeonly image2D outImage;
 
-layout(push_constant) uniform ImageInfo {
+layout (push_constant) uniform ImageInfo {
     int width;
     int height;
 } info;
 
+uint kernel[5][5] = {
+{ 1, 4, 6, 4, 1 },
+{ 4, 16, 24, 16, 4 },
+{ 6, 24, 36, 24, 6 },
+{ 4, 16, 24, 16, 4 },
+{ 1, 4, 6, 4, 1 }
+};
+
+shared float tile[12][12];
+void prepare_tile() {
+    ivec2 size = imageSize(outImage);
+    uvec2 wId = gl_WorkGroupID.xy;
+    uvec2 lId = gl_LocalInvocationID.xy;
+    uint baseX = wId.x * 8;
+    uint baseY = wId.y * 8;
+
+    for (int y = int(lId.y); y < 12; y += 8) {
+        for (int x = int(lId.x); x < 12; x += 8) {
+            int gy = int(baseY) + y - 2;
+            int gx = int(baseX) + x - 2;
+            if (gx >= 0 && gy >= 0 && gx < info.width && gy < info.height) {
+                vec2 uv = (vec2(gx, gy) + vec2(.5)) / vec2(size);
+                float yVal = texture(inImage, uv).r;
+                tile[y][x] = yVal;
+            } else {
+                tile[y][x] = 0.0;
+            }
+        }
+    }
+}
 void main() {
+
     ivec2 pixels = ivec2(gl_GlobalInvocationID.xy);
+    uvec2 lId = gl_LocalInvocationID.xy;
+
     ivec2 size = imageSize(outImage);
     if (pixels.x >= size.x || pixels.y >= size.y) return;
 
-    vec2 uv = (vec2(pixels) + vec2(.5)) / vec2(size);
-    float y = texture(inImage, uv).r;
-    imageStore(outImage, pixels, vec4(y, 0, 0, 0));
+    prepare_tile();
+    barrier();
+    float blur = 0.0f;
+    for (int ky = -2; ky <= 2; ky++) {
+        for (int kx = -2; kx <= 2; kx++) {
+            float weight = float(kernel[ky + 2][kx + 2]) / 256.0f;
+            float yVal = tile[lId.y + ky + 2][lId.x + kx + 2];
+            blur += yVal * weight;
+        }
+    }
+    imageStore(outImage, pixels, vec4(blur, 0, 0, 0));
 }

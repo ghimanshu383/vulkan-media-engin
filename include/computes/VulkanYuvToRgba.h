@@ -8,6 +8,7 @@
 #include <vulkan/vulkan.h>
 #include "Util.h"
 #include "computes/VulkanFilterR8Image.h"
+#include "computes/TemporalHistoryTwoImg.h"
 
 namespace fd {
     class ComputeYuvRgba {
@@ -60,6 +61,7 @@ namespace fd {
         bool firstRender = true;
 
         VulkanFilterR8* m_blur = nullptr;
+        TemporalHistoryTwoImg* m_temp = nullptr;
 
         void set_up_compute_command_buffer();
         void prepare_buffers_and_images();

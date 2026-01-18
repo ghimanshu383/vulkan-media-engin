@@ -23,6 +23,9 @@ namespace fd {
         m_blur = new VulkanFilterR8(m_ctx,
                                     R"(D:\cProjects\realTimeFrameDisplay\shaders\gaussianBlurCompute.comp.spv)",
                                     m_width, m_height);
+        m_temp = new TemporalHistoryTwoImg(m_ctx,
+                                           R"(D:\cProjects\realTimeFrameDisplay\shaders\temporalDiffTwoImg.comp.spv)",
+                                           m_width, m_height);
         vkMapMemory(m_ctx->logicalDevice, m_y_plane_buffer_memory, 0, m_width * m_height, 0, &yData);
         vkMapMemory(m_ctx->logicalDevice, m_u_plane_buffer_memory, 0, (m_width >> 1) * (m_height >> 1), 0, &uData);
         vkMapMemory(m_ctx->logicalDevice, m_v_plane_buffer_memory, 0, (m_width >> 1) * (m_height >> 1), 0, &vData);
@@ -271,6 +274,7 @@ namespace fd {
 
     void ComputeYuvRgba::invoke_r8_filters() {
         m_blur->compute(m_compute_command_buffer, m_y_image);
+        m_temp->compute(m_compute_command_buffer, m_y_image);
     }
 
     void ComputeYuvRgba::dispatch() {
@@ -360,5 +364,9 @@ namespace fd {
         vkDestroySemaphore(m_ctx->logicalDevice, m_compute_semaphore, nullptr);
         vkDestroyCommandPool(m_ctx->logicalDevice, m_compute_command_pool, nullptr);
         m_blur->cleanup();
+        m_temp->clean_up();
+
+        delete m_blur;
+        delete m_temp;
     }
 }

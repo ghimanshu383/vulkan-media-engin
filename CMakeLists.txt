@@ -39,6 +39,8 @@ add_executable(realTimeFrameDisplay main.cpp
         cpp/computes/VulkanYuvToRgba.cpp
         include/computes/VulkanFilterR8Image.h
         cpp/computes/VulkanFilterR8Image.cpp
+        cpp/computes/TemporalHisotryTwoImg.cpp
+        include/computes/TemporalHistoryTwoImg.h
 )
 
 target_include_directories(realTimeFrameDisplay PUBLIC

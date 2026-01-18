@@ -1,0 +1,23 @@
+#version 450
+
+layout (local_size_x = 8) in;
+layout (local_size_y = 8) in;
+
+layout (set = 0, binding = 0) uniform sampler2D[2] inImages;
+layout (set = 0, binding = 1, r8) uniform writeonly image2D outImage;
+
+layout (push_constant) uniform ImageInfo {
+    uint width;
+    uint height;
+} info;
+void main() {
+    ivec2 pixels = ivec2(gl_GlobalInvocationID.xy);
+    if (pixels.x < 0 || pixels.y < 0 || pixels.x >= info.width || pixels.y >= info.height) return;
+    ivec2 size = imageSize(outImage);
+    vec2 uv = (vec2(pixels) + vec2(0.5)) / vec2(size);
+    float yCurr = texture(inImages[0], uv).r;
+    float yPrev = texture(inImages[1], uv).r;
+
+    float diff = yCurr - yPrev;
+    imageStore(outImage, pixels, vec4(diff, 0, 0, 1));
+}
