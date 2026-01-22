@@ -3,21 +3,123 @@
 layout (local_size_x = 8) in;
 layout (local_size_y = 8) in;
 
-layout (set = 0, binding = 0) uniform sampler2D[2] inImages;
+layout (set = 0, binding = 0) uniform sampler2D[3] inImages;
 layout (set = 0, binding = 1, r8) uniform writeonly image2D outImage;
 
-layout (push_constant) uniform ImageInfo {
+layout (binding = 2) buffer MotionVectorBuffer {
+    ivec2 motionBuffer[];
+};
+
+layout (push_constant) uniform TemporalInfo {
     uint width;
     uint height;
+    uint currFrame;
 } info;
-void main() {
-    ivec2 pixels = ivec2(gl_GlobalInvocationID.xy);
-    if (pixels.x < 0 || pixels.y < 0 || pixels.x >= info.width || pixels.y >= info.height) return;
-    ivec2 size = imageSize(outImage);
-    vec2 uv = (vec2(pixels) + vec2(0.5)) / vec2(size);
-    float yCurr = texture(inImages[0], uv).r;
-    float yPrev = texture(inImages[1], uv).r;
 
-    float diff = yCurr - yPrev;
-    imageStore(outImage, pixels, vec4(diff, 0, 0, 1));
+shared float curr_img_block[8][8];
+shared float prev_img_block[16][16];
+shared ivec2 bestMv;
+shared float bestSad;
+
+
+float minSad = 0.002;
+float maxSad = 0.015;
+
+void prepare_blocks() {
+    int currIndex = int(info.currFrame % 3);
+    vec2 pixels = vec2(gl_GlobalInvocationID.xy);
+    vec2 size = vec2(imageSize(outImage));
+
+    int wy = int(gl_WorkGroupID.y);
+    int wx = int(gl_WorkGroupID.x);
+    int ly = int(gl_LocalInvocationID.y);
+    int lx = int(gl_LocalInvocationID.x);
+
+    vec2 currUv = (pixels + vec2(.5)) / size;
+
+    float currY = texture(inImages[currIndex % 3], currUv).r;
+    curr_img_block[ly][lx] = currY;
+
+    int baseX = wx * 8;
+    int baseY = wy * 8;
+
+    for (int y = ly; y < 16; y += 8) {
+        for (int x = lx; x < 16; x += 8) {
+            int gx = baseX + x - 4;
+            int gy = baseY + y - 4;
+            if (gx >= 0 && gx < info.width && gy >= 0 && gy < info.height) {
+                vec2 uv = (vec2(gx, gy) + vec2(.5)) / vec2(imageSize(outImage));
+                float val = texture(inImages[(info.currFrame + 2) % 3], uv).r;
+                prev_img_block[y][x] = val;
+            } else {
+                prev_img_block[y][x] = 0.0;
+            }
+        }
+    }
+
+}
+void main() {
+
+    ivec2 pixels = ivec2(gl_GlobalInvocationID.xy);
+    prepare_blocks();
+    barrier();
+
+    if (gl_LocalInvocationID.x == 0 && gl_LocalInvocationID.y == 0) {
+        ivec2 blockOrigin = ivec2(gl_WorkGroupID.xy * 8);
+        bestSad = 1e20;
+        bestMv = ivec2(0);
+        for (int dy = -4; dy <= 4; dy++) {
+            for (int dx = -4; dx <= 4; dx++) {
+                float sad = 0.0;
+                for (int y = 0; y < 8; y++) {
+                    for (int x = 0; x < 8; x++) {
+                        float c = curr_img_block[y][x];
+                        float p = prev_img_block[y + dy + 4][x + dx + 4];
+                        sad += abs(c - p);
+                    }
+                }
+                if (sad < bestSad) {
+                    bestSad = sad;
+                    bestMv = ivec2(dx, dy);
+                }
+            }
+        }
+    }
+    bestSad /= (8 * 8);
+    barrier();
+
+    bool validPixel = pixels.x > 0 && pixels.y > 0 && pixels.x < info.width && pixels.y < info.height;
+
+    if (validPixel) {
+        float alphaTarget = clamp((bestSad - minSad) / (maxSad - minSad), 0.6f, 1.0f);
+
+        vec2 size = vec2(imageSize(outImage));
+        vec2 currUv = (pixels + vec2(.5)) / size;
+        vec2 prevUv = (pixels + vec2(.5) + vec2(bestMv)) / size;
+
+        float currY = curr_img_block[gl_LocalInvocationID.y][gl_LocalInvocationID.x];
+        float prevY = texture(inImages[(info.currFrame + 1) % 3], prevUv).r;
+        float yVal = mix(prevY, currY, alphaTarget);
+
+        if (bestSad > maxSad) {
+            imageStore(outImage, pixels, vec4(currY, 0, 0, 1));
+        } else {
+            imageStore(outImage, pixels, vec4(yVal, 0, 0, 1));
+        }
+    }
+
+    if (gl_LocalInvocationID.x == 0 && gl_LocalInvocationID.y == 0) {
+
+        int blocksPerRow = (info.width + 7) / 8;
+        int blockIndex = gl_WorkGroupID.y * blocksPerRow + gl_WorkGroupID.x;
+        ivec2 blockOrigin = ivec2(gl_WorkGroupID.xy) * 8;
+
+        if (blockOrigin.x >= int(info.width) ||
+        blockOrigin.y >= int(info.height)) {
+            motionBuffer[blockIndex] = ivec2(0);
+        } else {
+            motionBuffer[blockIndex] = bestMv;
+        }
+    }
+
 }

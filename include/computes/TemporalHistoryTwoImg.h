@@ -15,16 +15,23 @@ namespace fd {
         uint32_t m_width;
         uint32_t m_height;
         static uint32_t m_frame_count;
-        std::vector<VkImage> m_history{2, VK_NULL_HANDLE};
+        std::vector<VkImage> m_history{3, VK_NULL_HANDLE};
         VkImage m_img_one{};
         VkImageView m_img_one_view{};
         VkDeviceMemory m_img_one_memory{};
         VkImage m_img_two{};
         VkImageView m_img_two_view{};
         VkDeviceMemory m_img_two_memory{};
+        VkImage m_img_three{};
+        VkImageView  m_img_three_view {};
+        VkDeviceMemory m_img_three_memory{};
         VkImage m_img_out{};
         VkImageView m_img_out_view{};
         VkDeviceMemory m_img_out_memory{};
+
+        uint32_t m_motion_vector_buffer_size;
+        VkBuffer m_motion_vectors_buffer{};
+        VkDeviceMemory m_motion_vectors_buffer_memory {};
 
         VkPipeline m_pipeline{};
         VkPipelineLayout m_pipeline_layout{};
@@ -35,6 +42,7 @@ namespace fd {
         VkSampler m_sampler_one{};
         VkSampler m_sampler_two{};
         VkSampler m_sampler_out{};
+        VkSampler m_sampler_three{};
 
         void setup_images_and_history();
 
@@ -51,3 +59,4 @@ namespace fd {
     };
 }
 #endif //REALTIMEFRAMEDISPLAY_TEMPORALHISTORYTWOIMG_H
+

@@ -37,6 +37,10 @@ namespace fd {
         std::vector<VkDescriptorSet> desSetFrame{};
     };
 }
+struct MotionVector {
+    int dx;
+    int dy;
+};
 struct Vertex {
     glm::vec3 pos;
     glm::vec2 uv;
@@ -44,6 +48,11 @@ struct Vertex {
 struct ImageExtent {
     uint32_t width;
     uint32_t height;
+};
+struct TemporalInfo {
+    uint32_t width;
+    uint32_t height;
+    uint32_t currFrameIndex;
 };
 struct VideoFrame {
     std::unique_ptr<uint8_t[]> yPlane;
@@ -93,6 +102,7 @@ find_memory_index(VkPhysicalDevice physicalDevice, uint32_t requiredIndex, VkMem
             return i;
         }
     }
+
     std::exit(EXIT_FAILURE);
 }
 
@@ -409,11 +419,11 @@ inline void record_transition_image(VkCommandBuffer commandBuffer, VkImage image
 inline void create_sampler(VkDevice logicalDevice, VkSampler &sampler) {
     VkSamplerCreateInfo samplerCreateInfo{};
     samplerCreateInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerCreateInfo.magFilter = VK_FILTER_LINEAR;
-    samplerCreateInfo.minFilter = VK_FILTER_LINEAR;
-    samplerCreateInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerCreateInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerCreateInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerCreateInfo.magFilter = VK_FILTER_NEAREST;
+    samplerCreateInfo.minFilter = VK_FILTER_NEAREST;
+    samplerCreateInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCreateInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCreateInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     samplerCreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
     samplerCreateInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
 
